@@ -1,0 +1,32 @@
+# cargo build --release --target=x86_64-unknown-linux-musl
+[package]
+name = "minidns"
+version = "0.1.0"
+authors = ["kiven <kivensoft@gmail.com>"]
+edition = "2021"
+
+[profile.release]
+opt-level = 'z'  # Optimize for size
+lto = true
+codegen-units = 1
+panic = 'abort'
+
+[[bin]]
+name = "mdns"
+path = "src/main.rs"
+
+[[bin]]
+name = "mdns-cli"
+path = "src/tinydns-cli.rs"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+log = "0.4"
+simplelog = "0.12"
+time = "0.3"
+simple_config_parser = "1.0"
+getopts = "0.2"
+rand = "0.8"
+mio = { version = "0.8", features = [ "net", "os-poll" ] }
+md5 = "0.7"
