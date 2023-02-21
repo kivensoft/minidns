@@ -1,5 +1,6 @@
 use std::net::{Ipv4Addr, Ipv6Addr};
-use super::bufutil::*;
+use anyhow::Result;
+use crate::bufutil::*;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ResultCode {

@@ -1,6 +1,4 @@
-
-pub type Error = Box<dyn std::error::Error>;
-pub type Result<T> = std::result::Result<T, Error>;
+use anyhow::Result;
 
 pub struct BytePacketBuffer {
     pub buf: [u8; 512],
@@ -19,7 +17,7 @@ impl BytePacketBuffer {
 
     fn check_range(&self, pos: usize) -> Result<()> {
         if pos >= self.len {
-            return Err("End of buffer".into());
+            bail!("End of buffer");
         }
         Ok(())
     }
@@ -82,7 +80,7 @@ impl BytePacketBuffer {
         loop {
             // Dns数据包是不受信任的数据，因此我们需要警惕。某人可以用跳转指令中的循环来制作数据包。这个守卫针对这样的分组
             if jumps_performed > max_jumps {
-                return Err(format!("Limit of {} jumps exceeded", max_jumps).into());
+                bail!("Limit of {max_jumps} jumps exceeded");
             }
 
             let len = self.get(pos)?;
@@ -158,7 +156,7 @@ impl BytePacketBuffer {
         for label in qname.split('.') {
             let len = label.len();
             if len > 0x34 {
-                return Err("Single label exceeds 63 characters of length".into());
+                bail!("Single label exceeds 63 characters of length");
             }
 
             self.buf[pos] = len as u8;

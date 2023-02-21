@@ -1,4 +1,4 @@
-use std::error::Error;
+use anyhow::{Result, Context};
 use getopts::Options;
 use simple_config_parser::Config;
 use rand::Rng;
@@ -36,10 +36,8 @@ macro_rules! get_opt_value {
     };
     ($matches:expr, $name:expr, $out_val:expr, $t:ty) => {
         if let Some(s) = $matches.opt_str($name) {
-            match s.parse::<$t>() {
-                Ok(n) => $out_val = n,
-                Err(_) => return Err(format!("command line option {} is not a number", $name)),
-            }
+            $out_val = s.parse::<$t>().with_context(
+                || format!("program argument {} is not a numbe", $name))?;
         }
     };
 }
@@ -58,10 +56,8 @@ macro_rules! get_cfg_value {
     };
     ($cfg: expr, $name: expr, $out_val: expr, $t:ty) => {
         if let Ok(s) = $cfg.get_str($name) {
-            match s.parse::<$t>() {
-                Ok(n) => $out_val = n,
-                Err(_) => return Err(format!("cconfigure file param {} is not a number", $name)),
-            }
+            $out_val = s.parse::<$t>().with_context(
+                || format!("app config file key {} is not a number", $name))?;
         }
     };
 }
@@ -76,20 +72,18 @@ macro_rules! struct_define {
         }
 
         impl $struct_name {
-            // $( #[allow(dead_code)]fn $field() -> &'static str { $long_opt } )*
-
             fn to_opts() -> getopts::Options {
                 let mut opts = getopts::Options::new();
                 $( set_opt_flag!(opts, $short_opt, $long_opt, $opt_name, $desc, $type); )*
                 opts
             }
 
-            fn set_from_getopts(&mut self, matches: &getopts::Matches) -> Result<(), String> {
+            fn set_from_getopts(&mut self, matches: &getopts::Matches) -> Result<()> {
                 $( get_opt_value!(matches, $long_opt, self.$field, $type); )*
                 Ok(())
             }
 
-            fn set_from_cfg(&mut self, cfg: &simple_config_parser::Config) -> Result<(), String> {
+            fn set_from_cfg(&mut self, cfg: &simple_config_parser::Config) -> Result<()> {
                 $( get_cfg_value!(cfg, $long_opt, self.$field, $type); )*
                 Ok(())
             }
@@ -98,11 +92,9 @@ macro_rules! struct_define {
 }
 
 struct_define!(AppConf,
-    help      : bool   => ["",   "help", "", "print this help menu"],
-    conf_file : String => ["c",  "conf-file", "CONF_FILE", "set configure file path"],
     log_level : String => ["L",  "log-level", "LOG_LEVEL", "set log level(trace/debug/info/warn/error/off)"],
     log_file  : String => ["F",  "log-file", "LOG_FILE", "set log file path"],
-    host      : String => ["h",  "host", "HOST", "set dns server listen address"],
+    host      : String => ["H",  "host", "HOST", "set dns server listen address"],
     port      : u16    => ["p",  "port", "PORT", "set dns server listen port"],
     dns       : String => ["d",  "dns", "DNS", "set parent dns server address"],
     hosts_file: String => ["b",  "hosts-file",  "HOSTS_FILE", "set hosts file path"],
@@ -113,8 +105,6 @@ struct_define!(AppConf,
 impl Default for AppConf {
     fn default() -> Self {
         AppConf {
-            help       : false,
-            conf_file  : String::new(),
             log_level  : String::from("info"),
             log_file   : String::new(),
             host       : String::from("0.0.0.0"),
@@ -157,35 +147,40 @@ pub fn print_banner(banner: &str) {
 /// Returns: 成功: Ok(ac), 显示帮助并退出: Ok(None), 错误 Err(e)
 /// 
 /// a Result<Option<AppConf>, Box<dyn Error>>.
-pub fn parse_args() -> Result<Option<AppConf>, Box<dyn Error>> {
+pub fn parse_args() -> Result<Option<AppConf>> {
+    const C_HELP: &str = "help";
+    const C_CONF_FILE: &str = "conf-file";
+
     let mut ac = AppConf::default();
     let mut args = std::env::args();
     let prog = args.next().unwrap();
 
-    let opts = AppConf::to_opts();
+    let mut opts = AppConf::to_opts();
+    opts.optflag("h", C_HELP, "print this help menu");
+    opts.optopt("c",  C_CONF_FILE, "set program config file path", "CONF_FILE");
 
-    let matches = match opts.parse(args) {
+    let matches = match opts.parse(args).with_context(|| "parse program arguments failed") {
         Ok(m) => m,
-        Err(_) => {
+        Err(e) => {
             print_usage(&prog, &opts);
-            return Ok(None);
+            return Err(e);
         },
     };
 
-    if matches.opt_present("help") {
+    if matches.opt_present(C_HELP) {
         print_usage(&prog, &opts);
         return Ok(None);
     }
 
-    ac.conf_file = match matches.opt_str("conf-file") {
+    let conf_file = match matches.opt_str(C_CONF_FILE) {
         Some(s) => s,
         None => {
             let mut path = std::path::PathBuf::from(prog);
             path.set_extension("conf");
-            path.to_str().ok_or("program name error")?.to_owned()
+            path.to_str().ok_or(anyhow!("program name error"))?.to_owned()
         }
     };
-    if let Ok(cfg) = Config::new().file(&ac.conf_file) {
+    if let Ok(cfg) = Config::new().file(&conf_file) {
         ac.set_from_cfg(&cfg)?;
     }
 

@@ -1,13 +1,17 @@
 # cargo build --release --target=x86_64-unknown-linux-musl
+# cargo test --bin mdns -- --nocapture test_hostsconfig
 [package]
 name = "minidns"
-version = "0.1.0"
+version = "1.0.2"
 authors = ["kiven <kivensoft@gmail.com>"]
 edition = "2021"
+description = "mini static and dynamic dns server"
+repository = "https://github.com/kivensoft/minidns"
 
 [profile.release]
 opt-level = 'z'  # Optimize for size
 lto = true
+strip = true
 codegen-units = 1
 panic = 'abort'
 
@@ -24,6 +28,7 @@ path = "src/tinydns-cli.rs"
 [dependencies]
 log = "0.4"
 simplelog = "0.12"
+anyhow = "1.0"
 time = "0.3"
 simple_config_parser = "1.0"
 getopts = "0.2"

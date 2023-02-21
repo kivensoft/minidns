@@ -4,6 +4,7 @@ use std::net::{SocketAddr, IpAddr, Ipv4Addr};
 use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use mio::{Events, Interest, Poll, Token, net::UdpSocket};
+use anyhow::{Result, Context};
 use super::bufutil::*;
 use super::dnsutil::*;
 
@@ -55,11 +56,17 @@ pub struct DnsServer {
 impl DnsServer {
 
     pub fn create(listen_addr: &str, up_dns_addr: &str, ttl: u32, key: &str) -> Result<DnsServer> {
-        let socket = UdpSocket::bind(listen_addr.parse()?)?;
-        log::info!("dns server startup {}, parent dns server {}", listen_addr, up_dns_addr);
+        let s_addr = listen_addr.parse().with_context(
+                || format!("dns server listen address {listen_addr} format error"))?;
+        let socket = UdpSocket::bind(s_addr).with_context(
+                || format!("bind dns server socket {listen_addr} failed"))?;
+        let up_socket = UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 0))
+                .with_context(|| "bind dns parent server socket 0.0.0.0:0 failed")?;
+
+        log::info!("dns server startup {listen_addr}, parent dns server {up_dns_addr}");
         Ok(DnsServer {
             socket,
-            up_socket: UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 0))?,
+            up_socket,
             poll: Poll::new()?,
             queries: Queries::new(),
             curr_req_id: 0,
@@ -72,7 +79,8 @@ impl DnsServer {
 
     pub fn register_host(&mut self, host: &str, ip: &str) -> Result<()> {
         log::debug!("register local host: {} {}", host, ip);
-        self.hosts.insert(host.to_string(), ip.parse()?);
+        self.hosts.insert(host.to_string(), ip.parse().with_context(
+                || format!("ip {ip} isn't ipv4 address"))?);
         Ok(())
     }
 
@@ -81,12 +89,14 @@ impl DnsServer {
         let mut events = Events::with_capacity(event_capacity);
         let mut next_clear_time = now_of_unix() + CLEAR_QUERIES_INTERVAL;
 
-        self.poll.registry().register(&mut self.socket, SERVER_TOKEN, Interest::READABLE)?;
-        self.poll.registry().register(&mut self.up_socket, UP_SERVER_TOKEN, Interest::READABLE)?;
+        self.poll.registry().register(&mut self.socket, SERVER_TOKEN, Interest::READABLE)
+                .with_context(|| format!("register socket event {} fail", SERVER_TOKEN.0))?;
+        self.poll.registry().register(&mut self.up_socket, UP_SERVER_TOKEN, Interest::READABLE)
+                .with_context(|| format!("register socket event {} fail", UP_SERVER_TOKEN.0))?;
 
         loop {
-            self.poll.poll(&mut events, None)?;
-            
+            self.poll.poll(&mut events, None).with_context(|| "socket event poll faild")?;
+
             for event in events.iter() {
                 match event.token() {
                     SERVER_TOKEN => self.server_recv(&mut req_buffer)?,
@@ -110,7 +120,7 @@ impl DnsServer {
             let (packet_size, source_address) = match self.socket.recv_from(&mut req_buffer.buf) {
                 Ok((packet_size, source_address)) => (packet_size, source_address),
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-                Err(e) => return Err(e.into()),
+                Err(e) => bail!(anyhow::Error::new(e).context("server recv data failed")),
             };
             req_buffer.len = packet_size;
 
@@ -153,7 +163,7 @@ impl DnsServer {
             let (packet_size, _) = match self.up_socket.recv_from(&mut req_buffer.buf) {
                 Ok((packet_size, source_address)) => (packet_size, source_address),
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-                Err(e) => return Err(e.into()),
+                Err(e) => bail!(anyhow::Error::new(e).context("client recv failed")),
             };
             req_buffer.len = packet_size;
 
@@ -232,14 +242,14 @@ impl DnsServer {
                 Some(up_query) => {
                     match response.answers[0] {
                         DnsRecord::A {domain: _, ref addr, ttl: _} =>
-                        return self.send_request(&IpAddr::V4(*addr), query.forword, &up_query.question),
+                            return self.send_request(&IpAddr::V4(*addr), query.forword, &up_query.question),
                         _ => {
                             self.remove_recursive_query(query.forword);
-                            return Err("dns server address is not ipv4".into());
+                            bail!("handle_response, answer is not ipv4");
                         },
                     }
                 },
-                None => return Err("parent query record not found".into()),
+                None => bail!("handle_response, question not found in queue"),
             };
         }
 
@@ -251,7 +261,7 @@ impl DnsServer {
 
             match self.remove_recursive_query(query.forword) {
                 Some(ref top_query) => return self.response(response.header.rescode, top_query, Some(&response.answers)),
-                None => return Err("top query record not found".into()),
+                None => bail!("handle_response: top query record not found"),
             }
         }
 
@@ -301,7 +311,8 @@ impl DnsServer {
 
         let mut req_buffer = BytePacketBuffer::new();
         packet.write(&mut req_buffer)?;
-        self.up_socket.send_to(&req_buffer.buf[..req_buffer.pos], SocketAddr::new(*dns_addr, 53))?;
+        self.up_socket.send_to(&req_buffer.buf[..req_buffer.pos], SocketAddr::new(*dns_addr, 53))
+                .with_context(|| "socket send data failed")?;
 
         Ok(())
     }
@@ -327,9 +338,9 @@ impl DnsServer {
         res_packet.write(&mut res_buffer)?;
 
         let len = res_buffer.pos();
-        let data = res_buffer.get_range(0, len)?;
+        let data = res_buffer.get_range(0, len).with_context(|| "response create data failed")?;
         
-        self.socket.send_to(data, query.addr)?;
+        self.socket.send_to(data, query.addr).with_context(|| "response send data failed")?;
 
         Ok(())
     }
@@ -385,7 +396,7 @@ impl DnsServer {
         // 校验参数数量
         if params.len() < C_DYNDNS_PARAM_COUNT {
             log::info!("dyndns packet format error");
-            self.socket.send_to("error".as_bytes(), *rep_addr)?;
+            self.socket.send_to("error".as_bytes(), *rep_addr).with_context(|| "dyndns packet format error")?;
             return Ok(true);
         }
         
@@ -398,13 +409,13 @@ impl DnsServer {
         // 校验参数md5
         if !check_dyndns_md5(&params, &self.key) {
             log::info!("dyndns packet checksum error");
-            self.socket.send_to("error".as_bytes(), *rep_addr)?;
+            self.socket.send_to("error".as_bytes(), *rep_addr).with_context(|| "dyndns packet checksum error")?;
             return Ok(true);
         }
         // 校验参数提交时间
         if !check_dyndns_time(&params[C_DYNDNS_PARAM_ID])? {
             log::info!("dyndns packet time error");
-            self.socket.send_to("error".as_bytes(), *rep_addr)?;
+            self.socket.send_to("error".as_bytes(), *rep_addr).with_context(|| "dyndns packet time error")?;
             return Ok(true);
         }
 
@@ -413,7 +424,7 @@ impl DnsServer {
             s => s.to_string(),
         };
 
-        self.register_host(params[C_DYNDNS_PARAM_HOST], &ip)?;
+        self.register_host(params[C_DYNDNS_PARAM_HOST], &ip).with_context(|| "dyndns register host failed")?;
 
         let rep = format!("{} {}", params[C_DYNDNS_PARAM_HOST], ip);
         self.socket.send_to(rep.as_bytes(), *rep_addr)?;
