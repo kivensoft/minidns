@@ -8,25 +8,43 @@
 #[allow(dead_code)] pub const C: &str = "\x1b[36m";
 #[allow(dead_code)] pub const W: &str = "\x1b[37m";
 
-#[macro_export] macro_rules! ansi_color_format {
-    ($c:expr, $($t:tt)*) => {
-        format_args!("{}{}\x1b[0m", $c, format_args!($($t)*))
-    };
-}
-
-/// example:
-/// ```
+/// ## Example:
+/// ```rust
 /// println!("this is {}", ac_red!("red"));
 /// println!("this is {}", ac_red!("my name is {}", "kiven"));
 /// ```
-#[macro_export] macro_rules! ac_black { ($($t:tt)*) => { ansi_color_format!($crate::ansi_color::K, $($t)*) }; }
-#[macro_export] macro_rules! ac_red { ($($t:tt)*) => { ansi_color_format!($crate::ansi_color::R, $($t)*) }; }
-#[macro_export] macro_rules! ac_green { ($($t:tt)*) => { ansi_color_format!($crate::ansi_color::G, $($t)*) }; }
-#[macro_export] macro_rules! ac_yellow { ($($t:tt)*) => { ansi_color_format!($crate::ansi_color::Y, $($t)*) }; }
-#[macro_export] macro_rules! ac_blue { ($($t:tt)*) => { ansi_color_format!($crate::ansi_color::B, $($t)*) }; }
-#[macro_export] macro_rules! ac_magenta { ($($t:tt)*) => { ansi_color_format!($crate::ansi_color::M, $($t)*) }; }
-#[macro_export] macro_rules! ac_cyan { ($($t:tt)*) => { ansi_color_format!($crate::ansi_color::C, $($t)*) }; }
-#[macro_export] macro_rules! ac_white { ($($t:tt)*) => { ansi_color_format!($crate::ansi_color::W, $($t)*) }; }
+#[macro_export] macro_rules! ac_black {
+    ($e:expr) => { format_args!("\x1b[30m{}\x1b[0m", $e) };
+     ($($t:tt)*) => { format_args!("\x1b[30m{}\x1b[0m", format_args!($($t)*)) };
+}
+#[macro_export] macro_rules! ac_red {
+    ($e:expr) => { format_args!("\x1b[31m{}\x1b[0m", $e) };
+     ($($t:tt)*) => { format_args!("\x1b[31m{}\x1b[0m", format_args!($($t)*)) };
+}
+#[macro_export] macro_rules! ac_green {
+    ($e:expr) => { format_args!("\x1b[32m{}\x1b[0m", $e) };
+     ($($t:tt)*) => { format_args!("\x1b[32m{}\x1b[0m", format_args!($($t)*)) };
+}
+#[macro_export] macro_rules! ac_yellow {
+    ($e:expr) => { format_args!("\x1b[33m{}\x1b[0m", $e) };
+     ($($t:tt)*) => { format_args!("\x1b[33m{}\x1b[0m", format_args!($($t)*)) };
+}
+#[macro_export] macro_rules! ac_blue {
+    ($e:expr) => { format_args!("\x1b[34m{}\x1b[0m", $e) };
+     ($($t:tt)*) => { format_args!("\x1b[34m{}\x1b[0m", format_args!($($t)*)) };
+}
+#[macro_export] macro_rules! ac_magenta {
+    ($e:expr) => { format_args!("\x1b[35m{}\x1b[0m", $e) };
+     ($($t:tt)*) => { format_args!("\x1b[35m{}\x1b[0m", format_args!($($t)*)) };
+}
+#[macro_export] macro_rules! ac_cyan {
+    ($e:expr) => { format_args!("\x1b[36m{}\x1b[0m", $e) };
+    ($($t:tt)*) => { format_args!("\x1b[36m{}\x1b[0m", format_args!($($t)*)) };
+}
+#[macro_export] macro_rules! ac_white {
+    ($e:expr) => { format_args!("\x1b[37m{}\x1b[0m", $e) };
+    ($($t:tt)*) => { format_args!("\x1b[37m{}\x1b[0m", format_args!($($t)*)) };
+}
 
 pub enum AnsiColor { Z, K, R, G, Y, B, M, C, W }
 

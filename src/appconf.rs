@@ -1,16 +1,13 @@
 use anyhow::{Result, Context};
-use getopts::Options;
 use simple_config_parser::Config;
-use rand::Rng;
-use crate::ansi_color::AnsiColor;
+use crate::ansicolor::AnsiColor;
 
-const G_BANNER: &str = r##"
-              _       _     __ Kivensoft         
-   ____ ___  (_)___  (_)___/ /___  _____
-  / __ `__ \/ / __ \/ / __  / __ \/ ___/
- / / / / / / / / / / / /_/ / / / (__  ) 
-/_/ /_/ /_/_/_/ /_/_/\__,_/_/ /_/____/  
-"##;
+pub trait AppConfig {
+    fn to_opts(&self) -> getopts::Options;
+    fn set_from_getopts(&mut self, matches: &getopts::Matches) -> Result<()>;
+    fn set_from_cfg(&mut self, cfg: &simple_config_parser::Config) -> Result<()>;
+    fn set_from_env(&mut self) -> Result<()>;
+}
 
 macro_rules! set_opt_flag {
     ($opts:expr, $short_opt:literal, $long_opt:literal, $opt_name:literal, $desc:literal, bool) => {
@@ -62,7 +59,26 @@ macro_rules! get_cfg_value {
     };
 }
 
-macro_rules! struct_define {
+macro_rules! get_env_value {
+    ($name: expr, $out_val: expr, String) => {
+        if let Ok(s) = std::env::var($name) {
+            $out_val = s;
+        }
+    };
+    ($name: expr, $out_val: expr, bool) => {
+        if let Ok(s) = std::env::var($name) {
+            $out_val = s.to_lowercase() == "true";
+        }
+    };
+    ($name: expr, $out_val: expr, $t:ty) => {
+        if let Ok(s) = std::env::var($name) {
+            $out_val = s.parse::<$t>().with_context(
+                || format!("environment var {} is not a number", $name))?;
+        }
+    };
+}
+
+macro_rules! appconfig_define {
     ( $struct_name:ident, $( $field:ident : $type:tt =>
             [ $short_opt:literal, $long_opt:tt, $opt_name:literal, $desc:literal ]),+ ) => {
         
@@ -71,8 +87,8 @@ macro_rules! struct_define {
             $( pub $field: $type,)*
         }
 
-        impl $struct_name {
-            fn to_opts() -> getopts::Options {
+        impl $crate::appconf::AppConfig for $struct_name {
+            fn to_opts(&self) -> getopts::Options {
                 let mut opts = getopts::Options::new();
                 $( set_opt_flag!(opts, $short_opt, $long_opt, $opt_name, $desc, $type); )*
                 opts
@@ -87,46 +103,29 @@ macro_rules! struct_define {
                 $( get_cfg_value!(cfg, $long_opt, self.$field, $type); )*
                 Ok(())
             }
+
+            fn set_from_env(&mut self) -> Result<()> {
+                $( get_env_value!($long_opt, self.$field, $type); )*
+                Ok(())
+            }
         }
     };
 }
 
-struct_define!(AppConf,
-    log_level : String => ["L",  "log-level", "LOG_LEVEL", "set log level(trace/debug/info/warn/error/off)"],
-    log_file  : String => ["F",  "log-file", "LOG_FILE", "set log file path"],
-    host      : String => ["H",  "host", "HOST", "set dns server listen address"],
-    port      : u16    => ["p",  "port", "PORT", "set dns server listen port"],
-    dns       : String => ["d",  "dns", "DNS", "set parent dns server address"],
-    hosts_file: String => ["b",  "hosts-file",  "HOSTS_FILE", "set hosts file path"],
-    ttl       : u32    => ["t",  "ttl", "TTL", "set dns record ttl seconds"],
-    key       : String => ["k",  "key", "KEY", "set dyndns update key"]
-);
-
-impl Default for AppConf {
-    fn default() -> Self {
-        AppConf {
-            log_level  : String::from("info"),
-            log_file   : String::new(),
-            host       : String::from("0.0.0.0"),
-            port       : 53,
-            dns        : String::from("0.0.0.0"), // 根服务器a的地址 198.41.0.4
-            hosts_file : String::new(),
-            ttl        : 300,
-            key        : String::new(),
-        }
-    }
-}
-
-fn print_usage(prog: &str, opts: &Options) {
+fn print_usage(prog: &str, opts: &getopts::Options, banner: &str) {
     let path = std::path::Path::new(prog);
     let prog = path.file_name().unwrap().to_str().unwrap();
-    let brief = format!("Usage: {} [options]", prog);
+    let brief = format!("Usage: {} {}", ac_cyan!(&prog), ac_green!("[options]"));
 
-    print_banner(G_BANNER);
+    print_banner(banner);
     println!("{}", opts.usage(&brief));
 }
 
 pub fn print_banner(banner: &str) {
+    use rand::Rng;
+
+    if banner.len() == 0 { return; }
+
     let mut rng = rand::thread_rng();
     let mut lines = String::new();
     let c_reset: &str = &AnsiColor::Z.to_string();
@@ -144,50 +143,87 @@ pub fn print_banner(banner: &str) {
 
 /// 解析命令行参数
 /// 
+/// 使用系统环境变量, 配置文件和命令行参数进行解析并填充ac结构
+/// 
+/// Returns: 参见 `parse_args_ext`
+/// 
+#[allow(dead_code)]
+pub fn parse_args<T>(ac: &mut T, banner: &str) -> Result<bool>
+        where T: AppConfig {
+    parse_args_ext(ac, banner, |_| true)
+}
+
+/// 解析命令行参数
+/// 
+/// 使用系统环境变量, 配置文件和命令行参数进行解析并填充ac结构,
+/// 并调用f函数判断参数是否合法(返回true合法, 返回false, 打印帮助信息并退出)
+/// 
 /// Returns: 成功: Ok(ac), 显示帮助并退出: Ok(None), 错误 Err(e)
 /// 
-/// a Result<Option<AppConf>, Box<dyn Error>>.
-pub fn parse_args() -> Result<Option<AppConf>> {
+pub fn parse_args_ext<T, F>(ac: &mut T, banner: &str, f: F) -> Result<bool>
+        where T: AppConfig, F: Fn(&T) -> bool {
     const C_HELP: &str = "help";
     const C_CONF_FILE: &str = "conf-file";
 
-    let mut ac = AppConf::default();
     let mut args = std::env::args();
     let prog = args.next().unwrap();
 
-    let mut opts = AppConf::to_opts();
+    let mut opts = ac.to_opts();
     opts.optflag("h", C_HELP, "print this help menu");
     opts.optopt("c",  C_CONF_FILE, "set program config file path", "CONF_FILE");
 
     let matches = match opts.parse(args).with_context(|| "parse program arguments failed") {
         Ok(m) => m,
         Err(e) => {
-            print_usage(&prog, &opts);
+            print_usage(&prog, &opts, banner);
             return Err(e);
         },
     };
 
     if matches.opt_present(C_HELP) {
-        print_usage(&prog, &opts);
-        return Ok(None);
+        print_usage(&prog, &opts, banner);
+        return Ok(false);
     }
 
-    let conf_file = match matches.opt_str(C_CONF_FILE) {
-        Some(s) => s,
-        None => {
-            let mut path = std::path::PathBuf::from(prog);
-            path.set_extension("conf");
-            path.to_str().ok_or(anyhow!("program name error"))?.to_owned()
-        }
-    };
-    if let Ok(cfg) = Config::new().file(&conf_file) {
-        ac.set_from_cfg(&cfg)?;
+    // 参数设置优先级：命令行参数 > 配置文件参数 > 环境变量参数
+    // 因此, 先读环境变量覆盖缺省参数,然后读配置文件覆盖, 最后用命令行参数覆盖
+    ac.set_from_env()?;
+
+    // 从配置文件读取参数, 如果环境变量及命令行未提供配置文件参数, 则允许读取失败, 否则, 读取失败返回错误
+    let mut conf_is_set = false;
+    let mut conf_file = String::new();
+    if let Ok(cf) = std::env::var(C_CONF_FILE) {
+        conf_is_set = true;
+        conf_file = cf;
+    }
+    if let Some(cf) = matches.opt_str(C_CONF_FILE) {
+        conf_is_set = true;
+        conf_file = cf;
+    }
+    if !conf_is_set {
+        let mut path = std::path::PathBuf::from(&prog);
+        path.set_extension("conf");
+        conf_file = path.to_str().ok_or(anyhow!("program name error"))?.to_owned();
+    }
+    match Config::new().file(&conf_file) {
+        Ok(cfg) => ac.set_from_cfg(&cfg)?,
+        Err(_) => {
+            if conf_is_set {
+                bail!("can't read app config file {conf_file}");
+            }
+        },
     }
 
+    // 从命令行读取参数
     ac.set_from_getopts(&matches)?;
 
-    print_banner(G_BANNER);
+    if !f(ac) {
+        print_usage(&prog, &opts, banner);
+        return Ok(false);
+    }
 
-    Ok(Some(ac))
+    print_banner(banner);
+
+    Ok(true)
 }
 

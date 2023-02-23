@@ -1,10 +1,8 @@
-#[macro_use(anyhow, bail)]
-extern crate anyhow;
+#[macro_use(anyhow, bail)] extern crate anyhow;
+#[macro_use] mod ansicolor;
+#[macro_use] mod appconf;
 
-#[macro_use]
-pub mod ansi_color;
-
-mod appconf;
+mod logwriter;
 mod bufutil;
 mod dnsutil;
 mod dnsserver;
@@ -16,6 +14,24 @@ use hostsconf::*;
 use std::str::FromStr;
 use anyhow::{Result, Context};
 
+const G_BANNER: &str = r##"
+              _       _     __ Kivensoft         
+   ____ ___  (_)___  (_)___/ /___  _____
+  / __ `__ \/ / __ \/ / __  / __ \/ ___/
+ / / / / / / / / / / / /_/ / / / (__  ) 
+/_/ /_/ /_/_/_/ /_/_/\__,_/_/ /_/____/  
+"##;
+
+appconfig_define!(AppConf,
+    log_level : String => ["L",  "log-level", "LOG_LEVEL", "set log level(trace/debug/info/warn/error/off)"],
+    log_file  : String => ["F",  "log-file", "LOG_FILE", "set log file path"],
+    host      : String => ["H",  "host", "HOST", "set dns server listen address"],
+    port      : u16    => ["p",  "port", "PORT", "set dns server listen port"],
+    dns       : String => ["d",  "dns", "DNS", "set parent dns server address"],
+    hosts_file: String => ["b",  "hosts-file",  "HOSTS_FILE", "set hosts file path"],
+    ttl       : u32    => ["t",  "ttl", "TTL", "set dns record ttl seconds"],
+    key       : String => ["k",  "key", "KEY", "set dyndns update key"]
+);
 
 pub fn init_log(log_level: &str, log_file: &str) -> Result<()> {
     let level = simplelog::LevelFilter::from_str(log_level)
@@ -34,7 +50,7 @@ pub fn init_log(log_level: &str, log_file: &str) -> Result<()> {
     if log_file != "" {
         let log_file = std::fs::OpenOptions::new().append(true).create(true).open(log_file)
                 .with_context(|| format!("open {log_file} failed"))?;
-        vec.push(simplelog::WriteLogger::new(level, cfg, log_file));
+        vec.push(simplelog::WriteLogger::new(level, cfg, logwriter::LogWriter::new(log_file)));
     }
 
     simplelog::CombinedLogger::init(vec).with_context(|| "init simplelog failed")?;
@@ -42,8 +58,24 @@ pub fn init_log(log_level: &str, log_file: &str) -> Result<()> {
     Ok(())
 }
 
+impl Default for AppConf {
+    fn default() -> Self {
+        AppConf {
+            log_level  : String::from("info"),
+            log_file   : String::new(),
+            host       : String::from("0.0.0.0"),
+            port       : 53,
+            dns        : String::from("0.0.0.0"), // 根服务器a的地址 198.41.0.4
+            hosts_file : String::new(),
+            ttl        : 300,
+            key        : String::new(),
+        }
+    }
+}
+
 fn init() -> Result<Option<Box<DnsServer>>> {
-    if let Some(ac) = appconf::parse_args()? {
+    let mut ac = AppConf::default();
+    if appconf::parse_args(&mut ac, G_BANNER)? {
         if ac.log_level == "trace" {
             println!("config setting: {ac:#?}\n");
         }
