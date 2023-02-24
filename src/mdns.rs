@@ -34,8 +34,7 @@ appconfig_define!(AppConf,
 );
 
 pub fn init_log(log_level: &str, log_file: &str) -> Result<()> {
-    let level = simplelog::LevelFilter::from_str(log_level)
-            .with_context(|| "log level format error")?;
+    let level = simplelog::LevelFilter::from_str(log_level).with_context(|| "log level format error")?;
 
     let mut cfg = simplelog::ConfigBuilder::new();
     cfg.set_level_padding(simplelog::LevelPadding::Right)
@@ -76,7 +75,7 @@ impl Default for AppConf {
 fn init() -> Result<Option<Box<DnsServer>>> {
     let mut ac = AppConf::default();
     if appconf::parse_args(&mut ac, G_BANNER)? {
-        if ac.log_level == "trace" {
+        if &ac.log_level.to_lowercase() == "trace" {
             println!("config setting: {ac:#?}\n");
         }
 

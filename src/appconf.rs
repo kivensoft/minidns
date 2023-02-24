@@ -6,7 +6,6 @@ pub trait AppConfig {
     fn to_opts(&self) -> getopts::Options;
     fn set_from_getopts(&mut self, matches: &getopts::Matches) -> Result<()>;
     fn set_from_cfg(&mut self, cfg: &simple_config_parser::Config) -> Result<()>;
-    fn set_from_env(&mut self) -> Result<()>;
 }
 
 macro_rules! set_opt_flag {
@@ -59,25 +58,6 @@ macro_rules! get_cfg_value {
     };
 }
 
-macro_rules! get_env_value {
-    ($name: expr, $out_val: expr, String) => {
-        if let Ok(s) = std::env::var($name) {
-            $out_val = s;
-        }
-    };
-    ($name: expr, $out_val: expr, bool) => {
-        if let Ok(s) = std::env::var($name) {
-            $out_val = s.to_lowercase() == "true";
-        }
-    };
-    ($name: expr, $out_val: expr, $t:ty) => {
-        if let Ok(s) = std::env::var($name) {
-            $out_val = s.parse::<$t>().with_context(
-                || format!("environment var {} is not a number", $name))?;
-        }
-    };
-}
-
 macro_rules! appconfig_define {
     ( $struct_name:ident, $( $field:ident : $type:tt =>
             [ $short_opt:literal, $long_opt:tt, $opt_name:literal, $desc:literal ]),+ ) => {
@@ -103,11 +83,6 @@ macro_rules! appconfig_define {
                 $( get_cfg_value!(cfg, $long_opt, self.$field, $type); )*
                 Ok(())
             }
-
-            fn set_from_env(&mut self) -> Result<()> {
-                $( get_env_value!($long_opt, self.$field, $type); )*
-                Ok(())
-            }
         }
     };
 }
@@ -118,6 +93,17 @@ fn print_usage(prog: &str, opts: &getopts::Options, banner: &str) {
     let brief = format!("Usage: {} {}", ac_cyan!(&prog), ac_green!("[options]"));
 
     print_banner(banner);
+    println!("{}", opts.usage(&brief));
+}
+
+fn print_usage_mini(prog: &str, opts: &getopts::Options, banner: &str) {
+    let path = std::path::Path::new(prog);
+    let prog = path.file_name().unwrap().to_str().unwrap();
+    let brief = format!("Usage: {} {}", ac_cyan!(&prog), ac_green!("[options]"));
+
+    if banner.len() > 0 {
+        println!("\n{}\n", banner);
+    }
     println!("{}", opts.usage(&brief));
 }
 
@@ -145,7 +131,7 @@ pub fn print_banner(banner: &str) {
 /// 
 /// 使用系统环境变量, 配置文件和命令行参数进行解析并填充ac结构
 /// 
-/// Returns: 参见 `parse_args_ext`
+/// Returns: 参见 [`parse_args_ext`]
 /// 
 #[allow(dead_code)]
 pub fn parse_args<T>(ac: &mut T, banner: &str) -> Result<bool>
@@ -160,6 +146,7 @@ pub fn parse_args<T>(ac: &mut T, banner: &str) -> Result<bool>
 /// 
 /// Returns: 成功: Ok(ac), 显示帮助并退出: Ok(None), 错误 Err(e)
 /// 
+#[allow(dead_code)]
 pub fn parse_args_ext<T, F>(ac: &mut T, banner: &str, f: F) -> Result<bool>
         where T: AppConfig, F: Fn(&T) -> bool {
     const C_HELP: &str = "help";
@@ -185,17 +172,11 @@ pub fn parse_args_ext<T, F>(ac: &mut T, banner: &str, f: F) -> Result<bool>
         return Ok(false);
     }
 
-    // 参数设置优先级：命令行参数 > 配置文件参数 > 环境变量参数
-    // 因此, 先读环境变量覆盖缺省参数,然后读配置文件覆盖, 最后用命令行参数覆盖
-    ac.set_from_env()?;
-
+    // 参数设置优先级：命令行参数 > 配置文件参数
+    // 因此, 先从配置文件读取参数覆盖缺省值, 然后用命令行参数覆盖
     // 从配置文件读取参数, 如果环境变量及命令行未提供配置文件参数, 则允许读取失败, 否则, 读取失败返回错误
     let mut conf_is_set = false;
     let mut conf_file = String::new();
-    if let Ok(cf) = std::env::var(C_CONF_FILE) {
-        conf_is_set = true;
-        conf_file = cf;
-    }
     if let Some(cf) = matches.opt_str(C_CONF_FILE) {
         conf_is_set = true;
         conf_file = cf;
@@ -223,6 +204,47 @@ pub fn parse_args_ext<T, F>(ac: &mut T, banner: &str, f: F) -> Result<bool>
     }
 
     print_banner(banner);
+
+    Ok(true)
+}
+
+#[allow(dead_code)]
+pub fn parse_args_mini<T, F>(ac: &mut T, banner: &str, f: F) -> Result<bool>
+        where T: AppConfig, F: Fn(&T) -> bool {
+    
+    const C_HELP: &str = "help";
+    const C_CONF_FILE: &str = "conf-file";
+
+    let mut args = std::env::args();
+    let prog = args.next().unwrap();
+
+    let mut opts = ac.to_opts();
+    opts.optflag("h", C_HELP, "print this help menu");
+
+    let matches = match opts.parse(args).with_context(|| "parse program arguments failed") {
+        Ok(m) => m,
+        Err(e) => {
+            print_usage_mini(&prog, &opts, banner);
+            return Err(e);
+        },
+    };
+
+    if matches.opt_present(C_HELP) {
+        print_usage_mini(&prog, &opts, banner);
+        return Ok(false);
+    }
+
+    // 从命令行读取参数
+    ac.set_from_getopts(&matches)?;
+
+    if !f(ac) {
+        print_usage_mini(&prog, &opts, banner);
+        return Ok(false);
+    }
+
+    if banner.len() > 0 {
+        println!("\n{}\n", banner);
+    }
 
     Ok(true)
 }

@@ -44,7 +44,7 @@ fn now_of_unix() -> u64 {
 
 fn main() -> Result<()> {
     let mut ac = AppConf::default();
-    if !appconf::parse_args_ext(&mut ac, "", |ac| !ac.domain.is_empty() && !ac.dns.is_empty())? {
+    if !appconf::parse_args_mini(&mut ac, "", |ac| !ac.domain.is_empty() && !ac.dns.is_empty())? {
         return Ok(())
     }
     if ac.debug {
