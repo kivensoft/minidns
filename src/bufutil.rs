@@ -17,7 +17,7 @@ impl BytePacketBuffer {
 
     fn check_range(&self, pos: usize) -> Result<()> {
         if pos >= self.len {
-            bail!("End of buffer");
+            anyhow::bail!("End of buffer");
         }
         Ok(())
     }
@@ -80,7 +80,7 @@ impl BytePacketBuffer {
         loop {
             // Dns数据包是不受信任的数据，因此我们需要警惕。某人可以用跳转指令中的循环来制作数据包。这个守卫针对这样的分组
             if jumps_performed > max_jumps {
-                bail!("Limit of {max_jumps} jumps exceeded");
+                anyhow::bail!("Limit of {max_jumps} jumps exceeded");
             }
 
             let len = self.get(pos)?;
@@ -156,7 +156,7 @@ impl BytePacketBuffer {
         for label in qname.split('.') {
             let len = label.len();
             if len > 0x34 {
-                bail!("Single label exceeds 63 characters of length");
+                anyhow::bail!("Single label exceeds 63 characters of length");
             }
 
             self.buf[pos] = len as u8;
@@ -187,4 +187,3 @@ impl BytePacketBuffer {
         Ok(())
     }
 }
-

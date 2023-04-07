@@ -22,7 +22,7 @@ impl HostsConfig {
         let mut status = Status::Start;
         let (mut ip_begin, mut ip_end) = (0, 0);
         let (mut host_begin, mut host_end) = (0, 0);
-        
+
         while pos < len {
             let c = self.data[pos];
 
@@ -89,7 +89,7 @@ impl HostsConfig {
             Status::Ip | Status::IpEnd | Status::FmtError => {
                 let p = if pos == len { pos } else { pos - 1};
                 let line = HostsConfig::location_line(&self.data, p);
-                bail!("hosts config format error in line {line}");
+                anyhow::bail!("hosts config format error in line {line}");
             },
             Status::Host => host_end = pos,
             _ => {},
@@ -103,7 +103,7 @@ impl HostsConfig {
             }
         }
 
-        bail!("hosts config format is not utf8");
+        anyhow::bail!("hosts config format is not utf8");
     }
 
     fn location_line(data: &[u8], pos: usize) -> usize {

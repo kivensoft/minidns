@@ -1,14 +1,12 @@
-#[macro_use(anyhow, bail)] extern crate anyhow;
-#[macro_use] mod ansicolor;
-#[macro_use] mod appconf;
-
 use anyhow::Result;
 use std::net::UdpSocket;
 
+const APP_NAME: &str = "mini dns client";   // 应用程序内部名称
+const APP_VER: &str = "2.0.6";      // 应用程序版本
 const C_MAGIC: &str = "kdns";
 const C_2023_01_01: u64 = 1672531200;
 
-appconfig_define!(AppConf,
+appconfig::appconfig_define!(AppConf,
     debug : bool   => ["D",  "debug", "", "set debug mode"],
     domain: String => ["n",  "domain", "DOMAIN", "set dynamic domain name"],
     ip    : String => ["i",  "ip", "IP", "set dynamic ip address"],
@@ -21,7 +19,7 @@ impl Default for AppConf {
         AppConf {
             debug  : false,
             domain : String::new(),
-            ip     : String::new(),
+            ip     : String::from("0.0.0.0"),
             key    : String::new(),
             dns    : String::new(),
         }
@@ -43,15 +41,13 @@ fn now_of_unix() -> u64 {
 }
 
 fn main() -> Result<()> {
+    let version = format!("{APP_NAME} version {APP_VER} CopyLeft Kivensoft 2015-2023.");
     let mut ac = AppConf::default();
-    if !appconf::parse_args_mini(&mut ac, "", |ac| !ac.domain.is_empty() && !ac.dns.is_empty())? {
+    if !appconfig::parse_args_ext(&mut ac, &version, |ac| !ac.domain.is_empty() && !ac.dns.is_empty())? {
         return Ok(())
     }
     if ac.debug {
         unsafe { DEBUG = true; }
-    }
-    if ac.ip.is_empty() {
-        ac.ip = "0.0.0.0".to_owned();
     }
     dbg_out!("application config setting: {:#?}", ac);
 
@@ -72,7 +68,7 @@ fn main() -> Result<()> {
     let socket = UdpSocket::bind("0.0.0.0:0")?;
     socket.set_read_timeout(Some(std::time::Duration::new(5, 0)))?;
     socket.set_write_timeout(Some(std::time::Duration::new(5, 0)))?;
-    
+
     let dns_addr = format!("{}:53", ac.dns);
     let mut buf = [0; 512];
 

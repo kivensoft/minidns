@@ -120,7 +120,7 @@ impl DnsServer {
             let (packet_size, source_address) = match self.socket.recv_from(&mut req_buffer.buf) {
                 Ok((packet_size, source_address)) => (packet_size, source_address),
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-                Err(e) => bail!(anyhow::Error::new(e).context("server recv data failed")),
+                Err(e) => anyhow::bail!(anyhow::Error::new(e).context("server recv data failed")),
             };
             req_buffer.len = packet_size;
 
@@ -143,7 +143,7 @@ impl DnsServer {
                             expire: expire_of_unix(),
                             count: Cell::new(0),
                         });
-        
+
                         if let Err(e) = self.handle_query(&query) {
                             log::error!("failed to process query request: {}", e);
                         }
@@ -163,7 +163,7 @@ impl DnsServer {
             let (packet_size, _) = match self.up_socket.recv_from(&mut req_buffer.buf) {
                 Ok((packet_size, source_address)) => (packet_size, source_address),
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-                Err(e) => bail!(anyhow::Error::new(e).context("client recv failed")),
+                Err(e) => anyhow::bail!(anyhow::Error::new(e).context("client recv failed")),
             };
             req_buffer.len = packet_size;
 
@@ -173,7 +173,7 @@ impl DnsServer {
                         log::error!("processing parent dns server error: {}", e);
                     }
                 },
-                Err(e) => 
+                Err(e) =>
                     log::error!("client_recv data format error: {}", e),
             };
         }
@@ -191,7 +191,7 @@ impl DnsServer {
             self.response(ResultCode::NOERROR, &query, Some(&answers))?;
             return Ok(());
         }
-        
+
         // 本地没找到, 而且也没有指定上级dns
         if self.up_dns_addr == IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)) {
             log::debug!("answer from local: {} not found, return refused", query.question.name);
@@ -228,7 +228,7 @@ impl DnsServer {
             Some(c) => c,
             None => return Ok(()),
         };
-        
+
         // 查询结果正确
         if !response.answers.is_empty() && response.header.rescode == ResultCode::NOERROR {
             // 非递归查询, 直接返回
@@ -245,11 +245,11 @@ impl DnsServer {
                             return self.send_request(&IpAddr::V4(*addr), query.forword, &up_query.question),
                         _ => {
                             self.remove_recursive_query(query.forword);
-                            bail!("handle_response, answer is not ipv4");
+                            anyhow::bail!("handle_response, answer is not ipv4");
                         },
                     }
                 },
-                None => bail!("handle_response, question not found in queue"),
+                None => anyhow::bail!("handle_response, question not found in queue"),
             };
         }
 
@@ -261,7 +261,7 @@ impl DnsServer {
 
             match self.remove_recursive_query(query.forword) {
                 Some(ref top_query) => return self.response(response.header.rescode, top_query, Some(&response.answers)),
-                None => bail!("handle_response: top query record not found"),
+                None => anyhow::bail!("handle_response: top query record not found"),
             }
         }
 
@@ -333,13 +333,13 @@ impl DnsServer {
                 res_packet.answers.push(rec.clone());
             }
         }
-        
+
         let mut res_buffer = BytePacketBuffer::new();
         res_packet.write(&mut res_buffer)?;
 
         let len = res_buffer.pos();
         let data = res_buffer.get_range(0, len).with_context(|| "response create data failed")?;
-        
+
         self.socket.send_to(data, query.addr).with_context(|| "response send data failed")?;
 
         Ok(())
@@ -365,7 +365,7 @@ impl DnsServer {
     /// 清理待查询队列, 将所有超时的查询项删除
     fn clear_queries_of_timeout(&mut self) {
         let now = now_of_unix();
-        
+
         self.queries.retain(|k, v| {
             let keep = now <= v.expire;
             if !keep {
@@ -388,7 +388,7 @@ impl DnsServer {
             return Ok(false);
         }
 
-        // 解析包        
+        // 解析包
         let text = String::from_utf8_lossy(&req_buffer.buf[.. req_buffer.len]);
         log::debug!("dyndns packet received: {}", text);
         let params: Vec<&str> = text.split(' ').collect();
@@ -399,13 +399,13 @@ impl DnsServer {
             self.socket.send_to("error".as_bytes(), *rep_addr).with_context(|| "dyndns packet format error")?;
             return Ok(true);
         }
-        
+
         log::debug!("dyndns packet: DIGEST = {}, ID = {}, HOST = {}, IP = {}",
                 params[C_DYNDNS_PARAM_DIGEST],
                 params[C_DYNDNS_PARAM_ID],
                 params[C_DYNDNS_PARAM_HOST],
                 params[C_DYNDNS_PARAM_IP]);
-        
+
         // 校验参数md5
         if !check_dyndns_md5(&params, &self.key) {
             log::info!("dyndns packet checksum error");
@@ -444,7 +444,7 @@ fn expire_of_unix() -> u64 {
     now_of_unix() + QUERY_TIMEOUT
 }
 
-fn check_dyndns_md5(params: &Vec<&str>, key: &str) -> bool { 
+fn check_dyndns_md5(params: &Vec<&str>, key: &str) -> bool {
     let mut ctx = md5::Context::new();
     ctx.consume(params[C_DYNDNS_PARAM_ID].as_bytes());
     ctx.consume(params[C_DYNDNS_PARAM_HOST].as_bytes());

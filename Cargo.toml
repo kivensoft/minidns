@@ -27,11 +27,9 @@ path = "src/mdns-cli.rs"
 
 [dependencies]
 log = "0.4"
-simplelog = "0.12"
 anyhow = "1.0"
-time = "0.3"
-simple_config_parser = "1.0"
-getopts = "0.2"
-rand = "0.8"
 mio = { version = "0.8", features = [ "net", "os-poll" ] }
 md5 = "0.7"
+asynclog = { version = "1.0", path = "asynclog" }
+appconfig = { version = "1.0", path = "appconfig" }
+ansicolor = { version = "1.0", path = "ansicolor" }
