@@ -2,17 +2,22 @@
 # cargo test --bin mdns -- --nocapture test_hostsconfig
 [package]
 name = "minidns"
-version = "1.0.2"
+version = "2.1.0"
 authors = ["kiven <kivensoft@gmail.com>"]
-edition = "2021"
+edition = "2024"
 description = "mini static and dynamic dns server"
 repository = "https://github.com/kivensoft/minidns"
+build = "build.rs"
+
+[profile.dev]
+debug = false
 
 [profile.release]
 opt-level = 'z'  # Optimize for size
 lto = true
 strip = true
 codegen-units = 1
+incremental = false
 panic = 'abort'
 
 [[bin]]
@@ -28,8 +33,8 @@ path = "src/mdns-cli.rs"
 [dependencies]
 log = "0.4"
 anyhow = "1.0"
-mio = { version = "0.8", features = [ "net", "os-poll" ] }
+mio = { version = "1", features = [ "net", "os-poll" ] }
 md5 = "0.7"
-asynclog = { version = "1.0", path = "asynclog" }
-appconfig = { version = "1.0", path = "appconfig" }
-ansicolor = { version = "1.0", path = "ansicolor" }
+appcfg = "1.0.2"
+asynclog = "1"
+ansicolor = "1"

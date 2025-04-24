@@ -64,7 +64,7 @@ impl BytePacketBuffer {
         let res = ((self.buf[self.pos] as u32) << 24)
             | ((self.buf[self.pos + 1] as u32) << 16)
             | ((self.buf[self.pos + 2] as u32) << 8)
-            | ((self.buf[self.pos + 3] as u32) << 0);
+            | (self.buf[self.pos + 3] as u32);
         self.pos += 4;
         Ok(res)
     }

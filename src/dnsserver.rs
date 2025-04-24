@@ -39,7 +39,7 @@ struct QueryData {
 
 type Query   = Rc<QueryData>;
 type Queries = HashMap<u16, Query>;
-type HOSTS   = HashMap<String, Ipv4Addr>;
+type Hosts   = HashMap<String, Ipv4Addr>;
 
 pub struct DnsServer {
     socket     : UdpSocket,    // DNS服务socket
@@ -49,7 +49,7 @@ pub struct DnsServer {
     curr_req_id: u16,          // 向上级DNS发送查询请求的当前请求id
     up_dns_addr: IpAddr,       // 上级dns服务器地址
     ttl        : u32,          // dns服务器回复的查询结果的生存时间
-    hosts      : HOSTS,        // 本服务器可以解析的域名字典
+    hosts      : Hosts,        // 本服务器可以解析的域名字典
     key        : String,       // 动态域名更新密钥
 }
 
@@ -72,7 +72,7 @@ impl DnsServer {
             curr_req_id: 0,
             up_dns_addr: up_dns_addr.parse()?,
             ttl,
-            hosts: HOSTS::new(),
+            hosts: Hosts::new(),
             key: key.to_string(),
         })
     }
@@ -138,7 +138,7 @@ impl DnsServer {
                         let query = Query::new(QueryData {
                             id: request.header.id,
                             addr: source_address,
-                            question: question,
+                            question,
                             forword: 0,
                             expire: expire_of_unix(),
                             count: Cell::new(0),
@@ -188,14 +188,14 @@ impl DnsServer {
         if let Some(rec) = self.local_lookup(&query.question.name) {
             log::debug!("answer from local: {:?}", rec);
             let answers = [rec];
-            self.response(ResultCode::NOERROR, &query, Some(&answers))?;
+            self.response(ResultCode::NoError, query, Some(&answers))?;
             return Ok(());
         }
 
         // 本地没找到, 而且也没有指定上级dns
         if self.up_dns_addr == IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)) {
             log::debug!("answer from local: {} not found, return refused", query.question.name);
-            self.response(ResultCode::NXDOMAIN, &query, None)?;
+            self.response(ResultCode::MxDomain, query, None)?;
             return Ok(());
         }
 
@@ -205,22 +205,17 @@ impl DnsServer {
             self.queries.insert(req_id, query.clone());
             self.send_request(&self.up_dns_addr, req_id, &query.question)
         } else {
-            self.response(ResultCode::REFUSED, &query, None)
+            self.response(ResultCode::Refused, query, None)
         }
     }
 
     /// 本地dns条目查询服务
     fn local_lookup(&self, qname: &str) -> Option<DnsRecord> {
-        match self.hosts.get(qname) {
-            Some(addr) => {
-                Some(DnsRecord::A {
+        self.hosts.get(qname).map(|addr| DnsRecord::A {
                     domain: String::from(qname),
                     addr: *addr,
                     ttl: self.ttl,
                 })
-            },
-            None => None
-        }
     }
 
     fn handle_response(&mut self, response: &DnsPacket) -> Result<()> {
@@ -230,7 +225,7 @@ impl DnsServer {
         };
 
         // 查询结果正确
-        if !response.answers.is_empty() && response.header.rescode == ResultCode::NOERROR {
+        if !response.answers.is_empty() && response.header.rescode == ResultCode::NoError {
             // 非递归查询, 直接返回
             if query.forword == 0 {
                 return self.response(response.header.rescode, &query, Some(&response.answers));
@@ -254,7 +249,7 @@ impl DnsServer {
         }
 
         // NXDOMAIN表示该域名不存在
-        if response.header.rescode == ResultCode::NXDOMAIN {
+        if response.header.rescode == ResultCode::MxDomain {
             if query.forword == 0 {
                 return self.response(response.header.rescode, &query, Some(&response.answers));
             }
@@ -267,7 +262,7 @@ impl DnsServer {
 
         // 递归查询次数限制
         if query.count.get() > MAX_FORWARD_COUNT {
-            return self.response(ResultCode::REFUSED, &query, None);
+            return self.response(ResultCode::Refused, &query, None);
         }
 
         // 否则, 尝试用新的dns服务器再次进行查找
@@ -280,7 +275,7 @@ impl DnsServer {
         // 如果解析NS记录的ip失败。则尝试解析NS别名
         let new_ns_name = match response.get_unresolved_ns(&query.question.name) {
             Some(x) => x,
-            None => return self.response(ResultCode::REFUSED, &query, None),
+            None => return self.response(ResultCode::Refused, &query, None),
         };
 
         // 先要解析处ns服务器别名对应的ip, 才能继续解析之前的请求
@@ -383,6 +378,7 @@ impl DnsServer {
 
     /// 动态dns更新函数
     fn dyn_dns(&mut self, req_buffer: &BytePacketBuffer, rep_addr: &SocketAddr) -> Result<bool> {
+        // 校验魔术及长度，判断是否是动态dns更新请求包，不是则返回false
         if req_buffer.len < C_DYNDNS_MIN_LEN
                 || &req_buffer.buf[..C_DNYDNS_MAGIC.len()] != C_DNYDNS_MAGIC {
             return Ok(false);
@@ -413,7 +409,7 @@ impl DnsServer {
             return Ok(true);
         }
         // 校验参数提交时间
-        if !check_dyndns_time(&params[C_DYNDNS_PARAM_ID])? {
+        if !check_dyndns_time(params[C_DYNDNS_PARAM_ID])? {
             log::info!("dyndns packet time error");
             self.socket.send_to("error".as_bytes(), *rep_addr).with_context(|| "dyndns packet time error")?;
             return Ok(true);
@@ -444,7 +440,7 @@ fn expire_of_unix() -> u64 {
     now_of_unix() + QUERY_TIMEOUT
 }
 
-fn check_dyndns_md5(params: &Vec<&str>, key: &str) -> bool {
+fn check_dyndns_md5(params: &[&str], key: &str) -> bool {
     let mut ctx = md5::Context::new();
     ctx.consume(params[C_DYNDNS_PARAM_ID].as_bytes());
     ctx.consume(params[C_DYNDNS_PARAM_HOST].as_bytes());

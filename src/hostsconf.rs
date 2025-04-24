@@ -15,7 +15,7 @@ impl HostsConfig {
     }
 
     pub fn next(&mut self) -> Result<Option<(&str, &str)>> {
-        // #[derive(Eq)]
+        #[derive(PartialEq, Eq)]
         enum Status { Start, Comment, Ip, IpEnd, Host, HostEnd, LineComment, FmtError }
 
         let (mut pos, len) = (self.pos, self.data.len());
@@ -154,10 +154,10 @@ mod tests {
         }
 
         let mut hc = HostsConfig { data: Vec::new(), pos: 0 };
-        assert!(None == hc.next().unwrap());
+        assert!(hc.next().unwrap().is_none());
 
         set_data(&mut hc, b"  #comment \r\n # comment");
-        assert!(None == hc.next().unwrap());
+        assert!(hc.next().unwrap().is_none());
 
         set_data(&mut hc, b"a");
         next_error!(hc);

@@ -4,26 +4,28 @@ use crate::bufutil::*;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ResultCode {
-    NOERROR  = 0,   // 没有错误
-    FORMERR  = 1,   // 报文格式错误（Format error），服务器不能理解请求的报文
-    SERVFAIL = 2,   // 域名服务器失败（Server failure），因为服务器的原因导致没办法处理这个请求
-    NXDOMAIN = 3,   // 名字错误（Name Error），只有对授权域名解析服务器有意义，指出解析的域名不存在
-    NOTIMP   = 4,   // 查询类型不支持（Not Implemented），即域名服务器不支持查询类型
-    REFUSED  = 5,   // 拒绝（Refused），一般是服务器由于设置的策略拒绝给出应答，如服务器不希望对某些请求者给出应答
+    NoError  = 0,   // 没有错误
+    FormatError  = 1,   // 报文格式错误（Format error），服务器不能理解请求的报文
+    ServeFail = 2,   // 域名服务器失败（Server failure），因为服务器的原因导致没办法处理这个请求
+    MxDomain = 3,   // 名字错误（Name Error），只有对授权域名解析服务器有意义，指出解析的域名不存在
+    NotImp   = 4,   // 查询类型不支持（Not Implemented），即域名服务器不支持查询类型
+    Refused  = 5,   // 拒绝（Refused），一般是服务器由于设置的策略拒绝给出应答，如服务器不希望对某些请求者给出应答
 }
 
 impl ResultCode {
     pub fn from_num(num: u8) -> ResultCode {
         match num {
-            1 => ResultCode::FORMERR,
-            2 => ResultCode::SERVFAIL,
-            3 => ResultCode::NXDOMAIN,
-            4 => ResultCode::NOTIMP,
-            5 => ResultCode::REFUSED,
-            0 | _ => ResultCode::NOERROR,
+            0 => ResultCode::FormatError,
+            1 => ResultCode::FormatError,
+            2 => ResultCode::ServeFail,
+            3 => ResultCode::MxDomain,
+            4 => ResultCode::NotImp,
+            5 => ResultCode::Refused,
+            _ => ResultCode::NoError,
         }
     }
 }
+
 #[derive(Clone, Debug)]
 pub struct DnsHeader {
     pub id: u16, // 16 bits
@@ -57,7 +59,7 @@ impl DnsHeader {
             opcode: 0,
             response: false,
 
-            rescode: ResultCode::NOERROR,
+            rescode: ResultCode::NoError,
             checking_disabled: false,
             authed_data: false,
             z: false,
@@ -105,7 +107,7 @@ impl DnsHeader {
                 | ((self.truncated_message as u8) << 1)
                 | ((self.authoritative_answer as u8) << 2)
                 | (self.opcode << 3)
-                | ((self.response as u8) << 7) as u8,
+                | ((self.response as u8) << 7),
         )?;
 
         buffer.write(
@@ -127,23 +129,23 @@ impl DnsHeader {
 
 #[derive(PartialEq, Eq, Debug, Clone, Hash, Copy)]
 pub enum QueryType {
-    UNKNOWN(u16),
+    Unknown(u16),
     A,     // 1
     NS,    // 2
-    CNAME, // 5
+    CName, // 5
     MX,    // 15
-    AAAA,  // 28
+    Aaaa,  // 28
 }
 
 impl QueryType {
-    pub fn to_num(&self) -> u16 {
-        match *self {
-            QueryType::UNKNOWN(x) => x,
+    pub fn to_num(self) -> u16 {
+        match self {
+            QueryType::Unknown(x) => x,
             QueryType::A => 1,
             QueryType::NS => 2,
-            QueryType::CNAME => 5,
+            QueryType::CName => 5,
             QueryType::MX => 15,
-            QueryType::AAAA => 28,
+            QueryType::Aaaa => 28,
         }
     }
 
@@ -151,10 +153,10 @@ impl QueryType {
         match num {
             1 => QueryType::A,
             2 => QueryType::NS,
-            5 => QueryType::CNAME,
+            5 => QueryType::CName,
             15 => QueryType::MX,
-            28 => QueryType::AAAA,
-            _ => QueryType::UNKNOWN(num),
+            28 => QueryType::Aaaa,
+            _ => QueryType::Unknown(num),
         }
     }
 }
@@ -192,7 +194,7 @@ impl DnsQuestion {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[allow(dead_code)]
 pub enum DnsRecord {
-    UNKNOWN {
+    Unknown {
         domain: String,
         qtype: u16,
         data_len: u16,
@@ -208,7 +210,7 @@ pub enum DnsRecord {
         host: String,
         ttl: u32,
     }, // 2
-    CNAME {
+    CName {
         domain: String,
         host: String,
         ttl: u32,
@@ -219,7 +221,7 @@ pub enum DnsRecord {
         host: String,
         ttl: u32,
     }, // 15
-    AAAA {
+    Aaaa {
         domain: String,
         addr: Ipv6Addr,
         ttl: u32,
@@ -244,28 +246,28 @@ impl DnsRecord {
                     ((raw_addr >> 24) & 0xFF) as u8,
                     ((raw_addr >> 16) & 0xFF) as u8,
                     ((raw_addr >> 8) & 0xFF) as u8,
-                    ((raw_addr >> 0) & 0xFF) as u8,
+                    (raw_addr & 0xFF) as u8,
                 );
 
                 Ok(DnsRecord::A { domain, addr, ttl })
             }
-            QueryType::AAAA => {
+            QueryType::Aaaa => {
                 let raw_addr1 = buffer.read_u32()?;
                 let raw_addr2 = buffer.read_u32()?;
                 let raw_addr3 = buffer.read_u32()?;
                 let raw_addr4 = buffer.read_u32()?;
                 let addr = Ipv6Addr::new(
                     ((raw_addr1 >> 16) & 0xFFFF) as u16,
-                    ((raw_addr1 >> 0) & 0xFFFF) as u16,
+                    (raw_addr1 & 0xFFFF) as u16,
                     ((raw_addr2 >> 16) & 0xFFFF) as u16,
-                    ((raw_addr2 >> 0) & 0xFFFF) as u16,
+                    (raw_addr2 & 0xFFFF) as u16,
                     ((raw_addr3 >> 16) & 0xFFFF) as u16,
-                    ((raw_addr3 >> 0) & 0xFFFF) as u16,
+                    (raw_addr3 & 0xFFFF) as u16,
                     ((raw_addr4 >> 16) & 0xFFFF) as u16,
-                    ((raw_addr4 >> 0) & 0xFFFF) as u16,
+                    (raw_addr4 & 0xFFFF) as u16,
                 );
 
-                Ok(DnsRecord::AAAA { domain, addr, ttl })
+                Ok(DnsRecord::Aaaa { domain, addr, ttl })
             }
             QueryType::NS => {
                 let mut ns = String::new();
@@ -277,11 +279,11 @@ impl DnsRecord {
                     ttl,
                 })
             }
-            QueryType::CNAME => {
+            QueryType::CName => {
                 let mut cname = String::new();
                 buffer.read_qname(&mut cname)?;
 
-                Ok(DnsRecord::CNAME {
+                Ok(DnsRecord::CName {
                     domain,
                     host: cname,
                     ttl,
@@ -299,10 +301,10 @@ impl DnsRecord {
                     ttl,
                 })
             }
-            QueryType::UNKNOWN(_) => {
+            QueryType::Unknown(_) => {
                 buffer.step(data_len as usize)?;
 
-                Ok(DnsRecord::UNKNOWN {
+                Ok(DnsRecord::Unknown {
                     domain,
                     qtype: qtype_num,
                     data_len,
@@ -351,13 +353,13 @@ impl DnsRecord {
                 let size = buffer.pos() - (pos + 2);
                 buffer.set_u16(pos, size as u16)?;
             }
-            DnsRecord::CNAME {
+            DnsRecord::CName {
                 ref domain,
                 ref host,
                 ttl,
             } => {
                 buffer.write_qname(domain)?;
-                buffer.write_u16(QueryType::CNAME.to_num())?;
+                buffer.write_u16(QueryType::CName.to_num())?;
                 buffer.write_u16(1)?;
                 buffer.write_u32(ttl)?;
 
@@ -389,13 +391,13 @@ impl DnsRecord {
                 let size = buffer.pos() - (pos + 2);
                 buffer.set_u16(pos, size as u16)?;
             }
-            DnsRecord::AAAA {
+            DnsRecord::Aaaa {
                 ref domain,
                 ref addr,
                 ttl,
             } => {
                 buffer.write_qname(domain)?;
-                buffer.write_u16(QueryType::AAAA.to_num())?;
+                buffer.write_u16(QueryType::Aaaa.to_num())?;
                 buffer.write_u16(1)?;
                 buffer.write_u32(ttl)?;
                 buffer.write_u16(16)?;
@@ -404,7 +406,7 @@ impl DnsRecord {
                     buffer.write_u16(*octet)?;
                 }
             }
-            DnsRecord::UNKNOWN { .. } => {
+            DnsRecord::Unknown { .. } => {
                 log::debug!("Skipping record: {:?}", self);
             }
         }
@@ -438,7 +440,7 @@ impl DnsPacket {
         result.header.read(buffer)?;
 
         for _ in 0..result.header.questions {
-            let mut question = DnsQuestion::new("".to_string(), QueryType::UNKNOWN(0));
+            let mut question = DnsQuestion::new("".to_string(), QueryType::Unknown(0));
             question.read(buffer)?;
             result.questions.push(question);
         }
@@ -531,8 +533,7 @@ impl DnsPacket {
                         DnsRecord::A { domain, addr, .. } if domain == host => Some(addr),
                         _ => None,
                     })
-            })
-            .map(|addr| *addr)
+            }).copied()
             // Finally, pick the first valid entry
             .next()
     }
